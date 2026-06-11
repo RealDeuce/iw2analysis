@@ -203,6 +203,21 @@ Feed record builders:
 | `FF` / `CTRL-L` | `0x37B1 -> 0x3DFE` | `0xA0 | AA6C` | Current line spacing `AA6D`, with form-feed record type. |
 | Full-line auto-feed | `0x2782 -> 0x3E07` | `0xE0 | AA6C` | Current line spacing `AA6D`. |
 
+Full-line printable overflow has an important split behavior. The renderer
+paths at `0x2A78-0x2AA5` and `0x2E0C-0x2E3B` detect that the current printable
+byte will not fit, commit/reset the current staged line through the shared
+line-reset path, and then retry the same byte from the reset position. The byte
+is not discarded and is not forced into the last column.
+
+The horizontal reset is effectively mandatory: the reset path restores `AA26`
+from `AA3C`, which is the left/base position after the full-line print trigger
+path has prepared the line state. The vertical feed is optional. Only
+`AA6A bit 0x20` (software switch A-6, `ESC D/Z 20 00`) controls whether the
+overflow path calls the normal LF record builder `0x3DDD` before retrying the
+byte. With the hard-reset default A-6 clear, the retried byte starts at the left
+edge of the same physical line. This is separate from A-8 LF-after-CR and from
+`ESC l0`/`ESC l1` CR-before-LF/FF behavior.
+
 `AA6C` is the feed direction byte. `ESC f` stores `0x00` for forward feed and
 `ESC r` stores `0x04` for reverse feed. The helpers OR this byte into the high
 byte of each feed record, so direction is carried with the queued motion rather

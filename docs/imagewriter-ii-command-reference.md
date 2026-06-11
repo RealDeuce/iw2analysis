@@ -207,6 +207,19 @@ ROM-observed paper/form interactions:
 | `1B 44 20 00` | `ESC D SPACE CTRL-@` | software switch | Add LF when line is full. | |
 | `1B 5A 20 00` | `ESC Z SPACE CTRL-@` | software switch | No LF when line is full. | hard/soft reset |
 
+When a printable byte would overflow a full line, the firmware treats the full
+line as a print trigger and forces the horizontal position back to the left
+margin before retrying that same byte. The byte is not discarded and is not
+overstruck in the last column.
+
+The vertical feed part of this overflow handling is controlled only by A-6
+(`ESC D SPACE CTRL-@` / `ESC Z SPACE CTRL-@`). With the hard-reset default
+`ESC Z SPACE CTRL-@`, the printer does not feed paper on full-line overflow, so
+the retried byte starts at the left edge of the same physical line. This is not
+the same as inserting a host `CR`: A-8 controls LF-after-CR, while A-6 controls
+LF-on-full-line. `ESC l0`/`ESC l1` affects explicit LF/FF handling and is not
+part of printable-byte overflow.
+
 ## Graphics
 
 | Bytes | Command | Class | Effect |
