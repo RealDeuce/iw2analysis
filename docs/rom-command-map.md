@@ -399,7 +399,7 @@ the last ambiguous bits are traced.
 | `AA6C` | byte | Feed direction: `0x00` forward, `0x04` reverse. | `ESC f` stores `0x00`; `ESC r` stores `0x04`; vertical-feed record builders OR this value into their record type byte. |
 | `AA6D` | word | Current line spacing in 1/144 inch units. | `ESC A` stores `0x0018`, `ESC B` stores `0x0012`, `ESC T` stores parsed value. |
 | `AA70/AA71` | byte pair | Print-quality state/current target. | `ESC a` and `ESC M` write both bytes; helper `0x3CDB` compares them. |
-| `AA7A` | byte | Ribbon/color selection. | `ESC K` writes transformed color digit at `0x2D39`; reset initializes it to `0x08`. |
+| `AA7A` | byte | Ribbon/color selection. | Reset initializes it to `0x08` for black. `ESC K` writes a transformed ribbon mask at `0x2D39`: `0 -> 0x08`, `1 -> 0x01`, `2 -> 0x02`, `3 -> 0x04`, `4 -> 0x03`, `5 -> 0x05`, `6 -> 0x06`. |
 | `AA48` | byte | Intercharacter spacing. | `ESC s` stores parsed digit at `0x2E4F`; reset clears it. |
 | `AA56` | word | Extra proportional spacing accumulator/value. | `ESC 1`-`ESC 6` store values `1`-`6`; reset clears it. |
 | `A8DA` | word | Page length in 1/144 inch units. | Reset stores `0x0630` or `0x06C0` from SW1-4; `ESC H nnnn` stores the parsed page length here. |
@@ -551,3 +551,9 @@ permits bidirectional alternating text and graphics passes.
   raw ESC command parser.
 - `0x23AE` can be mistaken for the `ESC K` input handler because it emits bytes
   `1B 4B n`. The real input handler is `0x2D27`.
+- `ESC K` command digits are not stored literally in `AA7A`: the ROM converts
+  them to a physical ribbon mask. This matches the manual's four-band ribbon
+  model: yellow, cyan, magenta, and black, with orange/green/purple represented
+  as combined-color masks. Render those combined selections by depositing their
+  primary color components; do not treat them as extra physical ribbon bands.
+  Explicit software overstrikes should accumulate on top of that.

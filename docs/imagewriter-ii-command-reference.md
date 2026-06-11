@@ -260,6 +260,28 @@ ROM-observed `ESC F` details:
 | `1B 4B 35` | `ESC K 5` | color | Green, yellow plus cyan. | |
 | `1B 4B 36` | `ESC K 6` | color | Purple, magenta plus cyan. | |
 
+The Apple manual describes the four physical ribbon bands as yellow, cyan
+("greenish-blue"), magenta ("purplish-red"), and black. Orange, green, and
+purple are documented as color combinations; the manual notes that other printer
+manuals often call those orange and purple combinations "red" and "blue."
+The ROM stores the selected color as a ribbon mask in `AA7A`: black is `0x08`,
+yellow `0x01`, magenta `0x02`, cyan `0x04`, orange `0x03`, green `0x05`, and
+purple `0x06`. Emulator RGB values are approximations, sanity-checked against
+public scans but not calibrated against known ribbon samples. Treat `ESC K 4`,
+`ESC K 5`, and `ESC K 6` as single command selections whose mask contains two
+primary ribbon bits: orange is yellow plus magenta, green is yellow plus cyan,
+and purple is magenta plus cyan. Render those masks as component ink deposits,
+not as invented fifth/sixth/seventh physical ribbon bands.
+For dot rendering, each component deposit should use the normal pin-strike
+kernel independently. That means a secondary color selection gets two deposits
+at the same nominal dot coordinate, with the renderer's usual radius, density,
+and placement variation applied to each component.
+
+Explicit overprinting is also cumulative: software can print one color, return
+to the same vertical position, and print another color over it. An emulator
+should accumulate those strikes into the page image rather than treating the
+later color as replacing the earlier one.
+
 ## Miscellaneous
 
 | Bytes | Command | Class | Effect | Default |
