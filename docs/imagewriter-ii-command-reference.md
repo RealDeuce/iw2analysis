@@ -271,7 +271,7 @@ ROM-observed `ESC F` details:
 | `1B 4B 33` | `ESC K 3` | color | Cyan. | |
 | `1B 4B 34` | `ESC K 4` | color | Orange, yellow plus magenta. | |
 | `1B 4B 35` | `ESC K 5` | color | Green, yellow plus cyan. | |
-| `1B 4B 36` | `ESC K 6` | color | Purple, magenta plus cyan. | |
+| `1B 4B 36` | `ESC K 6` | color | Purple/violet, magenta plus cyan. | |
 
 The Apple manual describes the four physical ribbon bands as yellow, cyan
 ("greenish-blue"), magenta ("purplish-red"), and black. Orange, green, and
@@ -280,11 +280,30 @@ manuals often call those orange and purple combinations "red" and "blue."
 The ROM stores the selected color as a ribbon mask in `AA7A`: black is `0x08`,
 yellow `0x01`, magenta `0x02`, cyan `0x04`, orange `0x03`, green `0x05`, and
 purple `0x06`. Emulator RGB values are approximations, sanity-checked against
-public scans but not calibrated against known ribbon samples. Treat `ESC K 4`,
-`ESC K 5`, and `ESC K 6` as single command selections whose mask contains two
-primary ribbon bits: orange is yellow plus magenta, green is yellow plus cyan,
-and purple is magenta plus cyan. Render those masks as component ink deposits,
-not as invented fifth/sixth/seventh physical ribbon bands.
+public scans but not calibrated against known ribbon samples. The service
+manuals' self-test names the same physical sequence as black, yellow, red,
+blue, orange, green, and purple; in that context red is magenta and blue is
+cyan.
+
+Treat `ESC K 4`, `ESC K 5`, and `ESC K 6` as single command selections whose
+mask contains two primary ribbon bits: orange is yellow plus magenta, green is
+yellow plus cyan, and purple/violet is magenta plus cyan. Render those masks as
+component ink deposits, not as invented fifth/sixth/seventh physical ribbon
+bands. The physical printer must position one ribbon band, print the buffered
+dots, then position the other band and overprint the same dot coordinates; there
+is no orange, green, or violet ribbon-motor state.
+
+The ROM's print setup path decomposes a combined mask by extracting the lowest
+set component bit first, storing the remaining bits for a later pass
+(`0x0CA1-0x0D29`, followed by the repeat path through `0x151C`). That makes the
+component order yellow then magenta for orange, yellow then cyan for green, and
+magenta then cyan for purple/violet. Apple's manual's yellow-first advice
+therefore matches the ROM behavior for yellow-bearing combinations; purple's
+magenta-then-cyan order comes from the ROM bit extraction rather than from a
+manual statement. That order matters only if the emulator models ribbon
+contamination or pass-timing artifacts; for normal page compositing,
+purple/violet is the cumulative result of both component deposits at the same
+coordinates.
 For dot rendering, each component deposit should use the normal pin-strike
 kernel independently. That means a secondary color selection gets two deposits
 at the same nominal dot coordinate, with the renderer's usual radius, density,

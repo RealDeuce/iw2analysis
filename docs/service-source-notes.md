@@ -31,8 +31,21 @@ Self-test:
 
 - Start by holding Form Feed while turning power on.
 - With a color ribbon, output alternates colors by line.
+- The ribbon-cam adjustment procedure expects one line each of black, yellow,
+  red, blue, orange, green, and purple, repeated until stopped. The programmer
+  reference names the physical bands yellow, cyan, magenta, and black; the
+  service wording's red/blue correspond to magenta/cyan in that command model.
 - First output includes ROM revision, DIP switch settings, and option-card status.
 - Then it prints lines containing alphabetic, numeric, and special characters.
+
+Color ribbon hardware:
+
+- The print head board handles ribbon motor drive and ribbon switch signals.
+- The ribbon switch detects that a color ribbon is installed; that status is
+  sent to the main board, which controls the ribbon motor position.
+- The color-ribbon cam adjustment is mechanical. If self-test colors overlap or
+  the black line loses its top/bottom half, the service procedures adjust the
+  ribbon cam/ring until the band alignment is correct.
 
 I/O:
 
@@ -84,6 +97,17 @@ Built-in tests:
 - Loopback adapter wiring: handshake pins 1 and 2 together, data pins 3 and 5 together.
 - Loopback failure prints `LOOP BACK TESTS FAILS` according to Sams OCR; the ROM string at `0x272D` reads `LOOP BACK TEST FAILS`.
 
+Color ribbon hardware:
+
+- Sams names the ribbon drive motor signals `RBN IN A`, `RBN IN B`, `RBN IN C`,
+  and `RBN IN D`, plus `RBN ON`.
+- The color ribbon switch must report a color ribbon, or be taped closed during
+  bench testing, before color programs operate the ribbon drive motor.
+- The ribbon motor should move the ribbon assembly down and up once at power-on,
+  and should run again when changing ribbon color.
+- If colors are incorrect but the motor operates, Sams points to the ribbon shift
+  cam adjustment rather than an electrical "mixed color" state.
+
 DIP switch summary matches the programmer reference:
 
 - `SW1-1` through `SW1-3`: national character set.
@@ -95,4 +119,3 @@ DIP switch summary matches the programmer reference:
 - `SW2-3`: hardware handshake vs XON/XOFF.
 - `SW2-4`: option card disabled/enabled.
 - `SW2-5`/`SW2-6`: factory hammer-fire timing; do not adjust except for alignment/service procedure.
-
