@@ -73,7 +73,7 @@ for emulator work:
 
 | Control | Meaning | ROM anchor | Confidence | Notes |
 | --- | --- | ---: | --- | --- |
-| `CTRL-G` (`0x07`) | Bell | `0x017C-0x0184`, `0x43CF` | medium | Early path compares against `0x07` and conditionally jumps to the bell/control routine. |
+| `CTRL-G` (`0x07`) | Alert/control, non-printing | `0x28D7`, hardware/status path `0x017C-0x0184 -> 0x43CF` | high for rendering | Literal `0x07` is not in the keyed control table; the default byte path rejects bytes below `0x20`, so it does not render as a glyph. The high-bit byte `0x87` can render only when eighth-bit inclusion leaves it unmasked. |
 | `CTRL-H` (`0x08`) | Backspace / overprint path | `0x274A -> 0x368C` | high | Special-cased before the table. In the normal overprint path it fetches the next printable byte, saves it in `AA08`, backs `AA3C` up by that byte's rendered advance, calls the shared line-position reset path, then sends the saved byte through `0x28D7`. |
 | `CTRL-I` (`0x09`) | Horizontal tab | `0x3718` | high | Walks the `A9C0+` tab table and advances `AA26` to the next tab stop. |
 | `CTRL-J` (`0x0A`) | Line feed / print trigger | `0x3799` | high | Calls `0x3DB1` print-trigger check, then `0x3DDD` line feed when allowed. |
@@ -300,14 +300,14 @@ branch instruction intentionally overlap.
 | --- | ---: | --- | --- |
 | `ESC !` | `0x2D15` | high | Sets an `AA5B` attribute bit; paired with `ESC "`. |
 | `ESC "` | `0x2D18` | high | Clears the same `AA5B` attribute bit. |
-| `ESC $` | `0x313E` | medium | Selects normal ROM font/path; handler alters `AA5B` font bits. |
-| `ESC &` | `0x32E5` | medium | MouseText/alternate character-set mode bit path. |
-| `ESC '` | `0x3163` | medium | Custom-character select path. |
+| `ESC $` | `0x313E` | high | Selects the normal ROM font/path; clears the active MouseText/custom source bits while preserving/recomputing the pitch-family bits in `AA5B`. |
+| `ESC &` | `0x32E5` | high | Selects the MouseText alias path; shares the same source-bit cluster as `ESC $`/`ESC '`/`ESC *` and is gated by `AA6B bit 0x20`. |
+| `ESC '` | `0x3163` | high | Selects ordinary custom-character printing. |
 | `ESC (` | `0x2E8D` | high | Horizontal tab set list. Uses `A9C0+` tab table and comma/period parser. |
 | `ESC )` | `0x2E7A` | high | Horizontal tab clear list. Shares `A9C0+` tab table code. |
-| `ESC *` | `0x3166` | medium | High-ASCII custom-character select path; interacts with `AA6B` bit `0x20`. |
-| `ESC +` | `0x317E` | medium | Custom load mode path. |
-| `ESC -` | `0x317B` | medium | Custom load mode path. |
+| `ESC *` | `0x3166` | high | Selects high-ASCII custom-character aliases; behavior is gated by `AA6B bit 0x20`, the eighth-data-bit software-switch state. |
+| `ESC +` | `0x317E` | high | Selects 16-dot maximum custom load mode, waits for output idle, then clears custom-character RAM. |
+| `ESC -` | `0x317B` | high | Selects 8-dot maximum custom load mode, waits for output idle, then clears custom-character RAM. |
 | `ESC 0` | `0x2E9B` | high | Clears tab table via `0x3A15`. |
 | `ESC 1` | `0x2D45` | high | Stores proportional spacing value `1` in `AA56`. |
 | `ESC 2` | `0x2D47` | high | Stores proportional spacing value `2` in `AA56`. |
@@ -315,8 +315,8 @@ branch instruction intentionally overlap.
 | `ESC 4` | `0x2D4B` | high | Stores proportional spacing value `4` in `AA56`. |
 | `ESC 5` | `0x2D4D` | high | Stores proportional spacing value `5` in `AA56`. |
 | `ESC 6` | `0x2D4F` | high | Stores proportional spacing value `6` in `AA56`. |
-| `ESC <` | `0x3241` | medium | Bidirectional/unidirectional bit path; paired with `ESC >`. |
-| `ESC >` | `0x324B` | medium | Bidirectional/unidirectional bit path; paired with `ESC <`. |
+| `ESC <` | `0x3241` | high | Selects bidirectional print mode through the same output-state path used by `ESC >`. |
+| `ESC >` | `0x324B` | high | Selects unidirectional/left-to-right print mode through the same output-state path used by `ESC <`. |
 | `ESC ?` | `0x3688` | high | Direct `JMP $217A`; `0x217A` stages and transmits `IW10...CR,NUL`. |
 | `ESC A` | `0x32FF` | high | Sets `AA6D = 0x0018`, matching 6 lpi (`24/144`). |
 | `ESC B` | `0x3306` | high | Sets `AA6D = 0x0012`, matching 8 lpi (`18/144`). |
@@ -437,6 +437,15 @@ eight-wire graphics column. Double-width mode accepts half the normal number of
 bytes per line and prints two identical dot columns for each graphics data byte.
 Bold mode prints each graphics dot twice with a small horizontal shift.
 
+Graphics columns are parsed and positioned in logical left-to-right order:
+`ESC F` rejects non-rightward positioning, and the graphics byte loop advances
+`AA26` by the rendered column width after each byte. That does not force the
+physical head pass to left-to-right. The manuals describe bidirectional printing
+as applying to buffered text or graphics and recommend unidirectional mode when
+graphics alignment matters, so the emulator should apply backlash according to
+the active print-pass direction while keeping logical graphics coordinates
+ascending.
+
 `ESC F` trace details:
 
 | Address | Behavior |
@@ -460,6 +469,15 @@ The bounds table is indexed by the pitch bits in `AA5B`:
 | `ESC e` semicondensed | `0x28` | `855` | `0000`-`0855` |
 | `ESC q` condensed | `0x30` | `959` | `0000`-`0959` |
 | `ESC p` proportional pica | `0x38` | `1151` | `0000`-`1151` |
+
+Character-source trace details:
+
+| Address | Behavior |
+| --- | --- |
+| `0x313E` | `ESC $` clears the alternate source state and updates `AA5B` without destroying the pitch family. |
+| `0x32E5` | `ESC &` selects the MouseText alias path unless the eighth-bit software-switch state diverts it to the shorter source-bit path. |
+| `0x3163` | `ESC '` selects ordinary custom-character printing. |
+| `0x3166-0x3174` | `ESC *` checks `AA6B bit 0x20`; depending on that eighth-bit state it either returns through the normal-source handler or sets up the high custom-character alias path. |
 
 Custom-character loading is anchored at `ESC I` handler `0x318F`. The ROM and
 manual agree that this is a repeated record stream, not an arbitrary byte run:
@@ -500,6 +518,21 @@ Target-key constraints from the manual and `0x3D79`:
 
 This means `CTRL-D` is not a global control command in the normal command table;
 it is meaningful at the next-target position inside the custom-character loader.
+
+Print direction trace details:
+
+| Address | Behavior |
+| --- | --- |
+| `0x3241-0x3248` | `ESC <` tests current output-state bits, then falls into the shared mode-update routine at `0x30E5`. |
+| `0x324B-0x3250` | `ESC >` stages a distinct mode value before entering the same shared update routine. |
+| `0x425E-0x4266` | The render/output path tests `AA44 bit 5`; when the bit is set it decrements an output pointer, otherwise it increments it. Because text and graphics paths both accumulate into `AA44`, this is an output-buffer phase/load bit, not a standalone bidirectional-mode flag. |
+
+For an emulator, direction should therefore be decided when a line or partial
+line is flushed for printing. A later `ESC <` or `ESC >` before `CR`, `LF`,
+`FF`, or another print trigger affects pending buffered text. Graphics data is
+logically consumed left-to-right, but the visible backlash offset should follow
+the active print-pass direction. `ESC >` forces left-to-right output; `ESC <`
+permits bidirectional alternating text and graphics passes.
 
 ## Documentation Corrections And Interactions
 

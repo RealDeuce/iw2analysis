@@ -24,7 +24,7 @@ high-ASCII character/custom-character inputs rather than control actions.
 
 | Bytes | Mnemonic | Class | Effect |
 | --- | --- | --- | --- |
-| `07` | `CTRL-G` | alert | Bell/control path. ROM-observed at `0x017C-0x0184` and `0x43CF`; exact enable conditions still need trace. |
+| `07` | `CTRL-G` | alert/control | Literal `0x07` does not print a glyph. High-bit `0x87` is separate: it aliases to `0x07` when the eighth bit is ignored, but can print the ROM high-ASCII glyph when the eighth bit is included. |
 | `08` | `CTRL-H` | print-head motion | Backspace one character. Enables overprinting; the following glyph is printed over the previous position rather than erasing it. |
 | `09` | `CTRL-I` | print-head motion | Horizontal tab to next tab stop. |
 | `0A` | `CTRL-J` | paper motion / print trigger | Line feed one line. Default also prints buffered line. |
@@ -43,6 +43,10 @@ Other low controls fall through the ROM's default byte path rather than the keye
 control table. With the eighth-bit switch set to ignore bit 7, high-bit bytes
 `80`-`9F` collapse to these controls; with bit 7 included, they can instead be
 treated as high-ASCII/custom-character input.
+
+`CTRL-G` follows that rule. The literal byte `0x07` is below the printable
+threshold in the default byte path and is not rendered. The byte `0x87` reaches
+the high-ASCII path only when the eighth-bit switch is set to include bit 7.
 
 The ROM implements `CTRL-H` by looking at the byte that follows it and rendering
 that byte at the backed-up position. For emulation, this is equivalent to a
@@ -79,6 +83,22 @@ Draft font does not support bold, double-width, half-height, subscript, superscr
 | `1B 2B` | `ESC +` | custom load mode | Custom characters max width 16 dots; clears loaded custom characters and enables 8-bit data. | |
 | `1B 49` | `ESC I` | custom load | Begin loading one or more `key width data...` custom-character records. | |
 | `04` | `CTRL-D` | custom load | End custom-character loading when read where the next `key` byte would appear. | |
+
+ROM trace notes for emulation:
+
+- `ESC $`, `ESC &`, `ESC '`, and `ESC *` are mutually exclusive
+  character-source selections at the command level: normal ROM font,
+  MouseText aliases, ordinary custom characters, and high custom-character
+  aliases respectively.
+- `ESC &` maps low ASCII `0x40..0x5F` onto MouseText glyphs. It is not layered
+  on top of the custom-character selectors.
+- `ESC '` selects custom characters assigned to their normal printable keys.
+- `ESC *` selects high custom-character aliases by accepting low ASCII
+  `0x20..0x6F` and adding `0x80`, so those bytes print custom slots
+  `0xA0..0xEF` when defined.
+- `ESC -` and `ESC +` choose the maximum custom-character load width, clear
+  downloaded-character RAM, and enable eight-bit data. They do not by
+  themselves select the custom font for printing.
 
 National character groups are selected through software switches A-1 through A-3:
 
@@ -138,6 +158,11 @@ National character groups are selected through software switches A-1 through A-3
 | `1B 30` | `ESC 0` | tabs | Clear all horizontal tabs. | cleared |
 | `1B 46 n n n n` | `ESC F nnnn` | print-head motion / graphics | Place print head `nnnn` dot columns from left margin, only if the target is to the right of the current head position. | |
 
+Print direction is a property of the print pass, not of each byte as it is
+received. A pending line should use the `ESC <`/`ESC >` mode in effect when
+the line or partial line is actually printed. `ESC >` forces left-to-right
+printing. `ESC <` permits alternating bidirectional text and graphics passes.
+
 ## Paper Motion
 
 | Bytes | Command | Class | Effect | Default |
@@ -196,6 +221,11 @@ Graphics data uses the top eight print wires. Bit 0 prints the top dot in a
 graphics column and bit 7 prints the bottom dot. Double-width mode (`CTRL-N`)
 prints two identical columns for each graphics byte, so the maximum accepted
 bytes per line is halved. Boldface is also available in graphics modes.
+
+Graphics bytes are interpreted in logical left-to-right column order. Physical
+print-head direction is still controlled by `ESC <`/`ESC >`: in bidirectional
+mode a graphics line can print on either pass, while `ESC >` forces the pass to
+left-to-right for better vertical alignment.
 
 ROM-observed `ESC F` details:
 

@@ -96,7 +96,7 @@ These names are descriptive, not final symbols.
 | `0x37C8 -> 0x275D` | `CTRL-X` current-line erase | Cancels the not-yet-printed current line without invoking the CR/LF/FF print-trigger gate or paper-feed path. |
 | `0x3688` | `ESC ?` table target | Jumps directly to `0x217A` self-ID staging. |
 | `0x41AD` | glyph/control metric comparison | Compares a decoded glyph/control metric against `0x1B`; this is renderer-side logic, not raw ESC command parsing. |
-| `0x43CF` | bell/control path | Main byte path jumps here for `CTRL-G` (`0x07`) under conditions at `0x017C-0x0184`. |
+| `0x43CF` | hardware alert/control path | Startup/status path reaches this for code `0x07` under conditions at `0x017C-0x0184`; print-parser rendering for literal `0x07` is resolved separately as non-printing. |
 
 ## Built-In Self-Test And Loopback
 
@@ -133,7 +133,7 @@ Firmware linkage summary:
 | ESC command dispatch | `0x2C07`, table at `0x2C1B` | high | `TABLE` loads `BC`, then `CALB` invokes the handler. Unsupported slots mostly map to `0x368B`. |
 | Self-ID (`ESC ?`) response payload | `0x3688 -> 0x217A` | high | `ESC ?` is a table entry that jumps to the ASCII `IW10...CR,NUL` response builder. |
 | Self-test/loop-test print strings | `0x2202-0x229F`, strings at `0x26D2+` | high | Direct string pointers and output calls. |
-| Bell (`CTRL-G`) | `0x017C-0x0184`, `0x43CF` | medium | Main path compares `A` with `0x07` and jumps to `0x43CF` if enabled. |
+| `CTRL-G` rendering behavior | `0x28D7`; hardware/status path `0x017C-0x0184`, `0x43CF` | high for rendering | Literal `0x07` is non-printing. High-bit `0x87` can render as a ROM high-ASCII glyph only when the eighth bit is included. |
 | Backspace/overprint (`CTRL-H`) | `0x274A -> 0x368C` | high | Lookahead overprint path. It renders the following byte at the backed-up position without erasing the previous glyph. |
 | Current-line erase (`CTRL-X`) | `0x37C8 -> 0x275D` | high | Takes effect when parsed from the buffered input stream. It clears unprinted staged line contents and leaves already printed output untouched. |
 | Carriage return and related controls | `0x36F5`, `0x3706`, `0x370D`, `0x3718`, `0x3799+` | high | Main table directly maps CR, double-width, tab, LF, VT, FF, and blank-line controls to these handlers. |
@@ -150,6 +150,6 @@ Firmware linkage summary:
 ## Next Reverse-Engineering Steps
 
 1. Name the receive queue and current-character variables around `AA00`, `AA04`, `AA64`, `AA66`, `AA68`, and `A8C4-A8C6`.
-2. Finish naming the remaining low-confidence control details: the external purpose of the undocumented `CTRL-]` vertical-format parser and its `C@` early-return form, and bell enable conditions at `0x43CF`.
+2. Finish the remaining control-behavior details that can affect output: the external purpose of the undocumented `CTRL-]` vertical-format parser and its `C@` early-return form.
 3. Convert the full listing into a commented disassembly with explicit data ranges for strings, ESC table data, the `0x28B0` control table, metrics, and fonts, so table decoding stops polluting code analysis.
 4. Finish the remaining hardware-layer paper details: name the internal paper-out sensor flag bits behind `ESC O`/`ESC o`, and decide whether command-level emulation needs the low-level paper-feed motor scheduler/port timing beyond the queued feed records already mapped.
