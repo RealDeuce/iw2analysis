@@ -37,16 +37,16 @@ buffered with printable data and are not necessarily acted on at interrupt time.
 selection:
 
 - `0` = correspondence (`ESC a 0`, `ESC m`)
-- `1` = draft (`ESC a 1`)
-- `2` = near letter quality (`ESC a 2`, `ESC M`)
+- `1` = near letter quality (`ESC a 2`, `ESC M`)
+- `2` = draft (`ESC a 1`)
 
 ROM behavior:
 
 - `0x39DB` initializes both bytes to `2`.
 - `ESC a` (`0x310D`) parses `0`, `1`, or `2` and writes the requested value.
 - `ESC m` (`0x3103`) resolves to correspondence (`0`).
-- `ESC M` (`0x30F5`) computes NLQ-like quality in the same request path as
-  `ESC a`.
+- `ESC M` (`0x30F5`) stores `1` (NLQ) through the same request path as
+  `ESC a 2`.
 - `0x3CDB` (`3BFC -> 3C22`) compares `AA70` and `AA71` and updates `AA71` through
   status-bit gating (`VV:4D`, `VV:CB`, `VV:EA`; draft branch also checks `VV:AA`)
   before returning.
@@ -383,7 +383,7 @@ branch instruction intentionally overlap.
 | `ESC X` | `0x312C` | high | Sets underline attribute bit in `AA5B`. |
 | `ESC Y` | `0x312F` | high | Clears underline attribute bit in `AA5B`. |
 | `ESC Z` | `0x3065` | high | Software switch open/clear. Reads two bytes, ANDs masked bits out of `AA6A/AA6B`. |
-| `ESC a` | `0x310D` | high | Reads ASCII `0`, `1`, or `2`; sets requested print-quality through `AA70/AA71` (`0` corr, `1` draft, `2` NLQ). |
+| `ESC a` | `0x310D` | high | Reads ASCII `0`, `1`, or `2`; sets requested print-quality through `AA70/AA71`. Command parameter does not equal internal value: `ESC a 0` stores `0` (corr), `ESC a 1` stores `2` (draft), `ESC a 2` stores `1` (NLQ). |
 | `ESC c` | `0x31E3` | high | Software reset path; flush/wait then jumps to reset routine at `0x275D`. |
 | `ESC e` | `0x2CF4` | high | Pitch mode; writes `AA5B` and `AA60`. |
 | `ESC f` | `0x32F4` | high | Forward feed direction; stores `AA6C = 0x00`. Paired with `ESC r`. |
@@ -441,7 +441,7 @@ the last ambiguous bits are traced.
 | `AA6B` | bit `0x20` | Ignore eighth data bit when set; include it when clear. | `0x3D07` tests this bit and masks `A &= 0x7F` only when active. |
 | `AA6C` | byte | Feed direction: `0x00` forward, `0x04` reverse. | `ESC f` stores `0x00`; `ESC r` stores `0x04`; vertical-feed record builders OR this value into their record type byte. |
 | `AA6D` | word | Current line spacing in 1/144 inch units. | `ESC A` stores `0x0018`, `ESC B` stores `0x0012`, `ESC T` stores parsed value. |
-| `AA70/AA71` | byte pair | Print-quality requested/effective mode (`0`/`1`/`2`). | `AA70` is requested and `AA71` is active; both are written together by commands, then helper `0x3CDB` compares and reconciles them. |
+| `AA70/AA71` | byte pair | Print-quality requested/effective mode: `0` corr, `1` NLQ, `2` draft. | `AA70` is requested and `AA71` is active; both are written together by commands, then helper `0x3CDB` compares and reconciles them. Reset stores `2` (draft). |
 | `AA7A` | byte | Ribbon/color selection. | Reset initializes it to `0x08` for black. `ESC K` writes a transformed ribbon mask at `0x2D39`: `0 -> 0x08`, `1 -> 0x01`, `2 -> 0x02`, `3 -> 0x04`, `4 -> 0x03`, `5 -> 0x05`, `6 -> 0x06`. The composite values are masks over physical bands, not extra band positions. |
 | `AA48` | byte | Intercharacter spacing. | `ESC s` stores parsed digit at `0x2E4F`; reset clears it. |
 | `AA56` | word | Extra proportional spacing accumulator. | `ESC 1`-`ESC 6` store values `1`-`6`; reset clears it. See rendering trace below for how this feeds into advance calculation. |
