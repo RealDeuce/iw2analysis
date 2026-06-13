@@ -69,6 +69,10 @@ printed `ABC`.
 
 Draft font does not support bold, double-width, half-height, subscript, superscript, or proportional printing. Selecting one of those modes while in draft temporarily switches to correspondence.
 
+ROM trace note: `ESC a`/`ESC m`/`ESC M` feed requested quality through the
+`AA70/AA71` mechanism. `3CDB` (entered from the printable-byte consume path) can
+clamp quality at render time, so the request is not always applied immediately.
+
 ## Character Sets
 
 | Bytes | Command | Class | Effect | Default |

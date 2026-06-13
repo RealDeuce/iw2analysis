@@ -23,8 +23,35 @@ Serial input is interrupt-driven but command execution is deferred:
 - `CALT ($00B6)` vectors to `0x3D07`, which calls `0x3BFC` and then applies the
   eighth-bit policy controlled by `AA6B` bit `0x20`.
 
+`0x3BFC` also executes print-quality synchronization before accepting the next
+printable byte: when the buffer is ready for char emission it calls `0x3C22`, which
+invokes `0x3CDB`. This helper compares `AA70` and `AA71` and advances the effective
+quality mode for the next glyph.
+
 This confirms the manuals' behavioral warning: commands received over serial are
 buffered with printable data and are not necessarily acted on at interrupt time.
+
+## Print Quality State Machine
+
+`AA70`/`AA71` are the quality request/effective mode pair used by draft vs NLQ
+selection:
+
+- `0` = correspondence (`ESC a 0`, `ESC m`)
+- `1` = draft (`ESC a 1`)
+- `2` = near letter quality (`ESC a 2`, `ESC M`)
+
+ROM behavior:
+
+- `0x39DB` initializes both bytes to `2`.
+- `ESC a` (`0x310D`) parses `0`, `1`, or `2` and writes the requested value.
+- `ESC m` (`0x3103`) resolves to correspondence (`0`).
+- `ESC M` (`0x30F5`) computes NLQ-like quality in the same request path as
+  `ESC a`.
+- `0x3CDB` (`3BFC -> 3C22`) compares `AA70` and `AA71` and updates `AA71` through
+  status-bit gating (`VV:4D`, `VV:CB`, `VV:EA`; draft branch also checks `VV:AA`)
+  before returning.
+- For implementation, `AA70` should be treated as requested quality and `AA71` as
+  effective quality that is reconciled at print sync points.
 
 ## Control Character Dispatch
 
@@ -343,7 +370,7 @@ branch instruction intentionally overlap.
 | `ESC I` | `0x318F` | high | Custom character load path. Reads glyph data until `CTRL-D` (`0x04`). |
 | `ESC K` | `0x2D27` | high | Reads ASCII digit `0`-`6` and stores color/ribbon selection in `AA7A`. |
 | `ESC L` | `0x30B6` | high | Parses three ASCII digits with `0x3FA8`; left margin. |
-| `ESC M` | `0x30F5` | high | Scribe font alias path; stores print-quality state through `AA70/AA71`. |
+| `ESC M` | `0x30F5` | high | Scribe font alias path; stores near-letter-quality request through the print-quality state path (`AA70/AA71`). |
 | `ESC N` | `0x2CDE` | high | Pitch mode; writes `AA5B` and `AA60`. |
 | `ESC O` | `0x30E1` | high | Paper-out sensor off path; hardware/status side effect only for command-level rendering. |
 | `ESC P` | `0x2CED` | high | Pitch mode; writes `AA5B` and `AA60`. |
@@ -356,7 +383,7 @@ branch instruction intentionally overlap.
 | `ESC X` | `0x312C` | high | Sets underline attribute bit in `AA5B`. |
 | `ESC Y` | `0x312F` | high | Clears underline attribute bit in `AA5B`. |
 | `ESC Z` | `0x3065` | high | Software switch open/clear. Reads two bytes, ANDs masked bits out of `AA6A/AA6B`. |
-| `ESC a` | `0x310D` | high | Reads ASCII `0`, `1`, or `2`; sets print-quality state through `AA70/AA71`. |
+| `ESC a` | `0x310D` | high | Reads ASCII `0`, `1`, or `2`; sets requested print-quality through `AA70/AA71` (`0` corr, `1` draft, `2` NLQ). |
 | `ESC c` | `0x31E3` | high | Software reset path; flush/wait then jumps to reset routine at `0x275D`. |
 | `ESC e` | `0x2CF4` | high | Pitch mode; writes `AA5B` and `AA60`. |
 | `ESC f` | `0x32F4` | high | Forward feed direction; stores `AA6C = 0x00`. Paired with `ESC r`. |
@@ -382,6 +409,7 @@ branch instruction intentionally overlap.
 | --- | --- |
 | `0x3FA8` | ASCII decimal parser. `B` gives digit count. Used by margins, page length, graphics counts, and tab commands. |
 | `0x3D07` | Fetch one buffered byte and optionally mask to 7 bits depending on `AA6B bit 0x20`. |
+| `0x3CDB` | Print-quality sync helper. Called from `0x3BFC` through `0x3C22` before printable-byte handling. |
 | `0x3D79` | Printable-byte validator for custom-character load. It rejects control bytes and handles high-ASCII/custom ranges based on mode bits. |
 | `0x3A15` | Clears a state/table block; used by tab reset and software reset paths. |
 | `0x217A` | Builds and sends the self-ID response. |
@@ -413,7 +441,7 @@ the last ambiguous bits are traced.
 | `AA6B` | bit `0x20` | Ignore eighth data bit when set; include it when clear. | `0x3D07` tests this bit and masks `A &= 0x7F` only when active. |
 | `AA6C` | byte | Feed direction: `0x00` forward, `0x04` reverse. | `ESC f` stores `0x00`; `ESC r` stores `0x04`; vertical-feed record builders OR this value into their record type byte. |
 | `AA6D` | word | Current line spacing in 1/144 inch units. | `ESC A` stores `0x0018`, `ESC B` stores `0x0012`, `ESC T` stores parsed value. |
-| `AA70/AA71` | byte pair | Print-quality state/current target. | `ESC a` and `ESC M` write both bytes; helper `0x3CDB` compares them. |
+| `AA70/AA71` | byte pair | Print-quality requested/effective mode (`0`/`1`/`2`). | `AA70` is requested and `AA71` is active; both are written together by commands, then helper `0x3CDB` compares and reconciles them. |
 | `AA7A` | byte | Ribbon/color selection. | Reset initializes it to `0x08` for black. `ESC K` writes a transformed ribbon mask at `0x2D39`: `0 -> 0x08`, `1 -> 0x01`, `2 -> 0x02`, `3 -> 0x04`, `4 -> 0x03`, `5 -> 0x05`, `6 -> 0x06`. The composite values are masks over physical bands, not extra band positions. |
 | `AA48` | byte | Intercharacter spacing. | `ESC s` stores parsed digit at `0x2E4F`; reset clears it. |
 | `AA56` | word | Extra proportional spacing accumulator. | `ESC 1`-`ESC 6` store values `1`-`6`; reset clears it. See rendering trace below for how this feeds into advance calculation. |
