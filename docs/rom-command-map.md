@@ -318,13 +318,13 @@ branch instruction intentionally overlap.
 | `ESC $` | `0x313E` | high | Selects the normal ROM font/path; clears the active MouseText/custom source bits while preserving/recomputing the pitch-family bits in `AA5B`. |
 | `ESC &` | `0x32E5` | high | Selects the MouseText alias path; shares the same source-bit cluster as `ESC $`/`ESC '`/`ESC *` and is gated by `AA6B bit 0x20`. |
 | `ESC '` | `0x3163` | high | Selects ordinary custom-character printing. |
-| `ESC (` | `0x2E8D` | high | Horizontal tab set list. Uses `A9C0+` tab table and comma/period parser. |
-| `ESC )` | `0x2E7A` | high | Horizontal tab clear list. Shares `A9C0+` tab table code. |
+| `ESC (` | `0x2E8D` | high | Horizontal tab set list. Uses `A9C0+` tab table and comma/period parser; see tab trace below. |
+| `ESC )` | `0x2E7A` | high | Horizontal tab clear list. Shares `A9C0+` tab table code; see tab trace below. |
 | `ESC *` | `0x3166` | high | Selects high-ASCII custom-character aliases; behavior is gated by `AA6B bit 0x20`, the eighth-data-bit software-switch state. |
 | `ESC +` | `0x317E` | high | Selects 16-dot maximum custom load mode, waits for output idle, then clears custom-character RAM. |
 | `ESC -` | `0x317B` | high | Selects 8-dot maximum custom load mode, waits for output idle, then clears custom-character RAM. |
 | `ESC 0` | `0x2E9B` | high | Clears tab table via `0x3A15`. |
-| `ESC 1` | `0x2D45` | high | Stores proportional spacing value `1` in `AA56`. |
+| `ESC 1` | `0x2D45` | high | Stores proportional spacing value `1` in `AA56`. Only effective in proportional pitch; see rendering trace below. |
 | `ESC 2` | `0x2D47` | high | Stores proportional spacing value `2` in `AA56`. |
 | `ESC 3` | `0x2D49` | high | Stores proportional spacing value `3` in `AA56`. |
 | `ESC 4` | `0x2D4B` | high | Stores proportional spacing value `4` in `AA56`. |
@@ -369,7 +369,7 @@ branch instruction intentionally overlap.
 | `ESC q` | `0x2CFA` | high | Pitch mode; writes `AA5B` and `AA60`. |
 | `ESC r` | `0x32FC` | high | Reverse feed direction; stores `AA6C = 0x04`. Paired with `ESC f`. |
 | `ESC s` | `0x2E3D` | high | Reads one ASCII digit `0`-`9`; stores intercharacter spacing in `AA48`. |
-| `ESC u` | `0x2E5A` | high | Add one tab stop; shares tab-table code. |
+| `ESC u` | `0x2E5A` | high | Add one tab stop; checks `A9BD < 32`, initializes `A9B6` if table is empty, then enters the shared tab parser for one value. |
 | `ESC v` | `0x3263` | high | Sets current form position `A8E0` to `0x0000` when perforation skip is disabled, or `0x0048` when it is enabled. |
 | `ESC w` | `0x2FF1` | high | Sets half-height state bits; paired with `ESC W`. |
 | `ESC x` | `0x3003` | high | Superscript state bits; paired with `ESC z`. |
@@ -416,13 +416,19 @@ the last ambiguous bits are traced.
 | `AA70/AA71` | byte pair | Print-quality state/current target. | `ESC a` and `ESC M` write both bytes; helper `0x3CDB` compares them. |
 | `AA7A` | byte | Ribbon/color selection. | Reset initializes it to `0x08` for black. `ESC K` writes a transformed ribbon mask at `0x2D39`: `0 -> 0x08`, `1 -> 0x01`, `2 -> 0x02`, `3 -> 0x04`, `4 -> 0x03`, `5 -> 0x05`, `6 -> 0x06`. The composite values are masks over physical bands, not extra band positions. |
 | `AA48` | byte | Intercharacter spacing. | `ESC s` stores parsed digit at `0x2E4F`; reset clears it. |
-| `AA56` | word | Extra proportional spacing accumulator/value. | `ESC 1`-`ESC 6` store values `1`-`6`; reset clears it. |
+| `AA56` | word | Extra proportional spacing accumulator. | `ESC 1`-`ESC 6` store values `1`-`6`; reset clears it. See rendering trace below for how this feeds into advance calculation. |
+| `AA09` | word | Extra proportional spacing output copy. | Copied from `AA56` at print trigger (`0x2DB5`); stored into the per-character output record at `0x3635`; consumed and cleared during physical output at `0x3561`. |
 | `A8DA` | word | Page length in 1/144 inch units. | Reset stores `0x0630` or `0x06C0` from SW1-4; `ESC H nnnn` stores the parsed page length here. |
 | `A8DC/A8DE` | words | Perforation-skip offsets/counters. | Reset, `ESC H`, and `ESC D/Z ... 04` maintain these as `0x0048` when perforation skip is enabled or zero/restored values when disabled. |
 | `A8E0` | word | Current form position used by the feed scheduler. | Reset and `ESC H` initialize it; `ESC v` writes only this word; lower-level feed routines compare/update it. |
 | `A8E2` | word | Saved/default line spacing for form logic. | Reset stores `0x0018`, matching default `AA6D`. |
 | `A8E4` | word | Saved perforation-skip/form baseline. | Reset copies the initialized perforation-skip value here; `ESC D 00 04` copies it back to `A8DE` when disabling skip. |
-| `A9C0+` | table | Horizontal tab stop table. | `ESC (`/`)`/`0`/`u` handlers operate on this region through `A9B6`, `A9B8`, and `A9BD`. |
+| `A9B6` | word | Tab table write/end pointer. | Points past the last entry in the `A9C0+` table. `ESC (` and `ESC u` advance it as entries are appended; `ESC )` compaction adjusts it. |
+| `A9B8` | word | Tab table search pointer. | `ESC )` sets this to `A9C0` before scanning for entries to delete. |
+| `A9BD` | byte | Tab stop count, maximum 32. | Incremented by `ESC (`/`ESC u` on each valid entry; decremented by `ESC )` compaction. |
+| `A9BE` | byte | Deleted-entry counter. | `ESC )` increments this for each zeroed match during the scan pass. |
+| `A9BF` | byte | Comma counter during tab list parsing. | Tracks how many comma-separated values have been parsed; capped at 32. |
+| `A9C0+` | table | Horizontal tab stop values, 2 bytes each, up to 32 entries. | Stored as column-position words. `ESC 0` and parse-failure paths clear the table via `0x3A15`. |
 
 Default setup is centered at `0x3989`:
 
@@ -433,6 +439,85 @@ Default setup is centered at `0x3989`:
   spacing (`AA48 = 0`), clears extra proportional spacing (`AA56 = 0`), and sets
   default line spacing (`AA6D = 0x0018`).
 - `0x3A15` clears the tab table block at `A9B6+`.
+
+## Extra Proportional Spacing Rendering Trace
+
+`ESC 1` through `ESC 6` set extra proportional dot spacing.  The handler
+addresses (`0x2D45`-`0x2D4F`) are overlapping `MVI L` instructions; the ESC
+dispatch TABLE jumps to the appropriate offset so L receives the digit value
+1-6.  The shared tail at `0x2D51` checks `AA5B & 0x18 == 0x18` (proportional
+pitch active); when the pitch is not proportional, L is forced to zero and the
+command has no effect.  `AA56` is then stored as the word `0x00:L`.
+
+The value flows through the rendering pipeline in three stages:
+
+| Stage | Address | Behavior |
+| --- | --- | --- |
+| Accumulation | `0x2DE1-0x2DED` | Called per character during line buffering.  `0x365D` steps the buffer pointer back to the previous record; `LDEAX (HL)` reads that record's advance value; `DADD EA,DE` adds `AA56` to it; the sum is stored back to `AA56`.  This accumulates the extra spacing across the buffered line. |
+| Print trigger | `0x2DB5-0x2DE0` | When `0x3456` returns with `RETS` (line ready to print), `AA56` is copied to `AA09` (`0x2DB9`).  The output record builder at `0x3635` stores `AA09` as part of the per-character record via `STEAX (HL++)`.  Both `AA56` and `AA09` are then cleared to zero (`0x2DD5-0x2DDC`). |
+| Physical output | `0x3561-0x357B` | `AA09` is loaded from the output record.  If the value exceeds 9, it is split across multiple output records through `0x35A5`; the remainder goes to `AA32`.  `AA09` is cleared at `0x3581` after the spacing is fully consumed. |
+
+The path selection between accumulation and print trigger is controlled by
+`0x3456`: a normal `RET` continues to the accumulation path at `0x2DE1`,
+while `RETS` (return-and-skip) causes the `JRE` at `0x2DB3` to be skipped,
+falling through to the print-trigger consumption at `0x2DB5`.
+
+## Horizontal Tab Set/Clear Trace
+
+`ESC (`, `ESC )`, `ESC u`, and `ESC 0` manage the horizontal tab stop table
+at `A9C0+`.  The table holds up to 32 two-byte column-position entries.
+`A9B6` is the write pointer (past the last entry), `A9BD` is the entry count.
+
+### Handler entry points
+
+| Command | Address | Setup |
+| --- | --- | --- |
+| `ESC (` | `0x2E8D` | Calls `CALT ($00A8)`, sets `A9B6 = $A9C0`, jumps to parser at `0x2F64`. |
+| `ESC )` | `0x2E7A` | Clears `A9BE` (delete counter), sets `A9B8 = $A9C0`, jumps to parser at `0x2F64`. |
+| `ESC u` | `0x2E5A` | Checks `A9BD < 32`; if the table is empty initializes `A9B6 = $A9C0`; jumps to parser at `0x2F64`. |
+| `ESC 0` | `0x2E9B` | Direct `JMP $3A15`; clears the entire tab table. |
+
+### Comma/period parser (`0x2F64`)
+
+The parser loop handles a comma-separated list of ASCII decimal column
+numbers terminated by a period:
+
+| Address | Behavior |
+| --- | --- |
+| `0x2F64-0x2F6D` | Clears `A9BF` (comma count), zeroes EA, pushes the previous value, sets `B = 3` (max digits). |
+| `0x2F70` | Calls `$3FA8` (shared ASCII decimal parser).  On parse failure, jumps to `0x2FD3` (abort). |
+| `0x2F75-0x2F7C` | Reads the terminator byte from `A9BC`; rejects control characters below `0x20`. |
+| `0x2F7E-0x2F85` | Calls `CALT ($00BE)` for buffer check.  Validates the parsed value is a single byte (H == 0) and less than 140 (`L < $8C`). |
+| `0x2F8C-0x2F9C` | Calls `$3D3F` to convert the column number, adds left margin `AA5E`, and bounds-checks the result via `CALT ($00AE)`. |
+| `0x2F9E-0x2FA1` | Pops the previous tab stop value and requires the new value to be strictly greater (`DLT`).  If not increasing, aborts to `0x2FD4` which clears the table. |
+
+### Set path (ESC ()
+
+| Address | Behavior |
+| --- | --- |
+| `0x2FA7-0x2FBC` | Stores the validated position word at the `A9B6` pointer via `STEAX (DE++)`, advances `A9B6`, and increments `A9BD`. |
+
+### Clear path (ESC ))
+
+| Address | Behavior |
+| --- | --- |
+| `0x2FD7-0x2FE0` | Checks `A9BD != 0` then jumps to `0x2E9E` (search-and-delete). |
+| `0x2E9E-0x2EBF` | Scans the tab table from `A9B8`.  For each entry matching the target value, zeroes the entry and increments `A9BE`. |
+| `0x2EC0-0x2F0F` | After the scan, if `A9BE > 0`, compacts the table by shifting non-zero entries down, updates `A9B6` and `A9BD`, then clears `A9BE`. |
+
+### Terminator handling
+
+| Address | Behavior |
+| --- | --- |
+| `0x2FC3` | Fetches the next input byte via `CALT ($00B6)`. |
+| `0x2FC5-0x2FC7` | Tests for comma (`0x2C`): if comma, jumps to `0x2FE2`. |
+| `0x2FC9-0x2FD2` | Tests for period (`0x2E`): if period, calls `CALT ($00A8)`, clears `A9BF`, and returns (list complete). |
+| `0x2FD3` | Abort path: pops saved value, falls through to `JMP $3A15` (clear table). |
+| `0x2FE2-0x2FEF` | Comma path: increments `A9BF`; if fewer than 32 commas, loops back to `0x2F6D` for the next value; at 32 commas, treats it as a period (done). |
+
+Any validation failure during parsing — bad digit, out-of-range column, non-
+increasing sequence, or unrecognized terminator — aborts through `0x2FD3`/
+`0x2FD4` and clears the entire tab table via `0x3A15`.
 
 ## Graphics And Custom Characters
 
